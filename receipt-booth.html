@@ -42,6 +42,13 @@
   .layoutPanel{width:min(760px,96vw);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid #303036;border-radius:18px;padding:20px}
   .layoutTitle{font-size:20px;font-weight:700;margin-bottom:4px}
   .layoutSub{font-size:12px;color:var(--muted);margin-bottom:16px}
+
+  .nameField{margin-bottom:16px}
+  .nameField label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;letter-spacing:.5px}
+  .nameField input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #303036;
+    background:#1c1c20;color:var(--text);font-family:inherit;font-size:16px;}
+  .nameField input:focus{outline:2px solid var(--accent);}
+
   .layoutGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
   .layoutCard{background:#202024;color:var(--text);border:2px solid transparent;border-radius:14px;padding:10px;cursor:pointer;text-align:center}
   .layoutCard.selected{border-color:var(--accent);background:#29291f}
@@ -57,6 +64,11 @@
 </style>
 </head>
 <body>
+
+<!-- Real, scannable CODE128 barcode rendering (self-hosted copy recommended for
+     offline reliability — see the note at the bottom of the chat reply). -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.code128.min.js"></script>
+
 <div id="app">
   <header>
     <div class="title">RECEIPT BOOTH</div>
@@ -81,6 +93,12 @@
     <div class="layoutPanel">
       <div class="layoutTitle">Choose Print Layout</div>
       <div class="layoutSub">Select how your photo will appear on the 80 mm thermal print.</div>
+
+      <div class="nameField">
+        <label for="guestName">Your name (optional — printed on the receipt)</label>
+        <input type="text" id="guestName" maxlength="24" placeholder="e.g. Alex">
+      </div>
+
       <div class="layoutGrid">
         <button class="layoutCard selected" data-layout="portrait"><div class="layoutThumb"><canvas id="thumbPortrait"></canvas></div><div class="layoutName">Portrait</div></button>
         <button class="layoutCard" data-layout="strip"><div class="layoutThumb"><canvas id="thumbStrip"></canvas></div><div class="layoutName">Photo Strip</div></button>
@@ -131,6 +149,43 @@ function toast(msg, ms=2200){
   toastEl.style.display = 'block';
   clearTimeout(toast._t);
   toast._t = setTimeout(()=> toastEl.style.display='none', ms);
+}
+
+/* ---------------- Receipt numbering ---------------- */
+// Persists across reloads on this device, so the kiosk hands out
+// sequential-looking "order numbers" all night, e.g. #000042.
+function nextReceiptNumber(){
+  let n = parseInt(localStorage.getItem('receiptCounter') || '0', 10);
+  n += 1;
+  localStorage.setItem('receiptCounter', String(n));
+  return n;
+}
+function peekReceiptNumber(){
+  // used only for live thumbnail previews, does not consume a number
+  return (parseInt(localStorage.getItem('receiptCounter') || '0', 10) + 1);
+}
+
+/* ---------------- Barcode ---------------- */
+// Renders a real, scannable CODE128 barcode onto an offscreen canvas
+// using the JsBarcode library loaded above.
+function drawBarcode(value){
+  const bc = document.createElement('canvas');
+  try{
+    JsBarcode(bc, value, {
+      format: 'CODE128',
+      displayValue: false,
+      width: 2,
+      height: 54,
+      margin: 0,
+      background: '#ffffff',
+      lineColor: '#000000'
+    });
+  }catch(e){
+    // Fails gracefully (e.g. JsBarcode not loaded — no internet on first
+    // load) by leaving a small blank canvas instead of breaking the print.
+    bc.width = 300; bc.height = 54;
+  }
+  return bc;
 }
 
 /* ---------------- Camera ---------------- */
@@ -262,11 +317,13 @@ const retakeBtn = $('retakeBtn');
 const layoutOverlay = $('layoutOverlay');
 const layoutPrintBtn = $('layoutPrintBtn');
 const layoutRetakeBtn = $('layoutRetakeBtn');
+const guestNameInput = $('guestName');
 let selectedLayout = 'portrait';
 
 function showLayoutChooser(){
   if(!lastShot) return;
   selectedLayout='portrait';
+  guestNameInput.value = '';
   document.querySelectorAll('.layoutCard').forEach(c=>c.classList.toggle('selected',c.dataset.layout===selectedLayout));
   drawLayoutThumbs();
   layoutOverlay.classList.add('show');
@@ -280,9 +337,38 @@ function drawFitImage(ctx,source,x,y,w,h){
   ctx.drawImage(source,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
 }
 
-function buildLayoutCanvas(layout){
+// Draws the personalized name line + order number + scannable
+// barcode as a shared footer block, used by every layout. Returns
+// the height it consumed so callers can size their canvas.
+function drawReceiptFooter(ctx, W, y, receiptNo, guestName){
+  const margin = 24;
+  let cy = y;
+
+  if (guestName) {
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('FOR: ' + guestName.toUpperCase(), W/2, cy + 22);
+    cy += 34;
+  }
+
+  ctx.font = '16px Arial';
+  const orderStr = 'ORDER NO. ' + String(receiptNo).padStart(6,'0');
+  ctx.fillText(orderStr, W/2, cy + 16);
+  cy += 26;
+
+  const barcodeValue = String(receiptNo).padStart(6,'0');
+  const bcCanvas = drawBarcode(barcodeValue);
+  const bcDrawWidth = Math.min(W - margin*2, 320);
+  const bcDrawHeight = bcCanvas.height * (bcDrawWidth / bcCanvas.width);
+  ctx.drawImage(bcCanvas, (W-bcDrawWidth)/2, cy, bcDrawWidth, bcDrawHeight);
+  cy += bcDrawHeight + 10;
+
+  return cy - y;
+}
+
+function buildLayoutCanvas(layout, receiptNo, guestName){
   const W=PRINTER_WIDTH_DOTS, margin=24, gap=18;
-  const H=layout==='strip'?1040:layout==='receipt'?850:layout==='minimal'?720:760;
+  const footerH = 95 + (guestName ? 34 : 0); // reserved space for name+order+barcode
+  const H=(layout==='strip'?1040:layout==='receipt'?850:layout==='minimal'?720:760) + footerH;
   const c=document.createElement('canvas'); c.width=W; c.height=H;
   const ctx=c.getContext('2d');
   ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.fillStyle='#000';ctx.textAlign='center';
@@ -292,11 +378,13 @@ function buildLayoutCanvas(layout){
     drawFitImage(ctx,lastShot,margin,60,W-margin*2,590);
     ctx.font='20px Arial';ctx.fillText(new Date().toLocaleDateString(),W/2,690);
     ctx.font='bold 20px Arial';ctx.fillText('THANKS FOR VISITING!',W/2,725);
+    drawReceiptFooter(ctx, W, 750, receiptNo, guestName);
   }else if(layout==='strip'){
     ctx.font='bold 28px Arial';ctx.fillText('PHOTO BOOTH',W/2,38);
     const boxW=W-margin*2,boxH=285;
     for(let i=0;i<3;i++) drawFitImage(ctx,lastShot,margin,55+i*(boxH+gap),boxW,boxH);
-    ctx.font='bold 20px Arial';ctx.fillText('THANKS FOR VISITING!',W/2,H-25);
+    ctx.font='bold 20px Arial';ctx.fillText('THANKS FOR VISITING!',W/2,1040-25);
+    drawReceiptFooter(ctx, W, 1040, receiptNo, guestName);
   }else if(layout==='receipt'){
     ctx.font='bold 30px Arial';ctx.fillText('*** PHOTO BOOTH ***',W/2,40);
     ctx.font='19px Arial';ctx.fillText(new Date().toLocaleString(),W/2,72);
@@ -305,14 +393,22 @@ function buildLayoutCanvas(layout){
     ctx.fillRect(margin,705,W-margin*2,3);
     ctx.font='bold 22px Arial';ctx.fillText('SMILE! THANKS FOR VISITING',W/2,745);
     ctx.font='18px Arial';ctx.fillText('YOUR PHOTO MEMORY',W/2,780);
+    drawReceiptFooter(ctx, W, 800, receiptNo, guestName);
   }else{
-    drawFitImage(ctx,lastShot,0,0,W,H);
+    // Minimal: photo stays the star; only a small barcode strip at
+    // the very bottom, no name/order text, to keep the look clean.
+    drawFitImage(ctx,lastShot,0,0,W,720);
+    const bcCanvas = drawBarcode(String(receiptNo).padStart(6,'0'));
+    const bcW = 220, bcH = bcCanvas.height * (bcW/bcCanvas.width);
+    ctx.drawImage(bcCanvas, (W-bcW)/2, 730, bcW, bcH);
   }
   return c;
 }
 
 function drawThumb(id,layout){
-  const thumb=$(id),preview=buildLayoutCanvas(layout);
+  const thumb=$(id);
+  const previewNo = peekReceiptNumber();
+  const preview=buildLayoutCanvas(layout, previewNo, guestNameInput.value.trim());
   const scale=Math.min(190/preview.width,240/preview.height);
   thumb.width=Math.round(preview.width*scale);
   thumb.height=Math.round(preview.height*scale);
@@ -322,6 +418,7 @@ function drawLayoutThumbs(){
   drawThumb('thumbPortrait','portrait');drawThumb('thumbStrip','strip');
   drawThumb('thumbReceipt','receipt');drawThumb('thumbMinimal','minimal');
 }
+guestNameInput.addEventListener('input', () => drawLayoutThumbs());
 
 document.querySelectorAll('.layoutCard').forEach(card=>{
   card.onclick=()=>{
@@ -365,14 +462,16 @@ async function doPrint(){
   if(!bleChar){toast('Connect the printer first');return;}
   mainBtn.disabled=true;layoutPrintBtn.disabled=true;layoutPrintBtn.textContent='PRINTING…';
   try{
-    const layoutCanvas=buildLayoutCanvas(selectedLayout);
+    const receiptNo = nextReceiptNumber();
+    const guestName = guestNameInput.value.trim();
+    const layoutCanvas=buildLayoutCanvas(selectedLayout, receiptNo, guestName);
     const dithered=prepareReceiptImage(layoutCanvas,PRINTER_WIDTH_DOTS);
     const imgBytes=ditheredToEscposBytes(dithered,PRINTER_WIDTH_BYTES);
     let payload=[];
     payload=payload.concat(escposInit(),escposAlignCenter());
     payload=payload.concat(escposRasterHeader(PRINTER_WIDTH_BYTES,dithered.height));
     payload=payload.concat(imgBytes,escposFeed(4));
-    await printerWrite(payload);toast('Printed!');
+    await printerWrite(payload);toast('Printed! #'+String(receiptNo).padStart(6,'0'));
   }catch(e){toast('Print failed: '+e.message,4000);}
   finally{
     layoutPrintBtn.disabled=false;layoutPrintBtn.textContent='PRINT';

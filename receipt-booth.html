@@ -21,8 +21,8 @@
   main{flex:1; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden;}
   video, #snapCanvas{width:100%; height:100%; object-fit:cover; display:block;}
   #snapCanvas{display:none; position:absolute; inset:0;}
-  #countdown{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    font-size:40vw; font-weight:900; color:#fff; text-shadow:0 0 40px #000; pointer-events:none;}
+  #countdown{position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+    font-size:34vw; font-weight:900; color:#fff; text-shadow:0 0 40px #000; pointer-events:none; text-align:center;}
   #flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none;}
   footer{padding:20px; display:flex; gap:14px; justify-content:center; align-items:center;
     border-top:1px solid #232327; background:var(--panel);}
@@ -30,16 +30,16 @@
     font-weight:700; cursor:pointer; letter-spacing:.5px;}
   .primary{background:var(--accent); color:#1a1a00; flex:1; max-width:420px;}
   .primary:disabled{opacity:.4;}
-  .ghost{background:#232327; color:var(--text);}
+  .ghost{background:#232327; color:var(--text); flex:1; max-width:260px;}
   .danger{background:var(--danger); color:#1a0000;}
   #setupOverlay{position:absolute; inset:0; background:#000d; display:flex; align-items:center;
     justify-content:center; z-index:20; flex-direction:column; gap:16px; padding:24px; text-align:center;}
   #setupOverlay p{color:var(--muted); max-width:480px; line-height:1.5; font-size:14px;}
   .hidden{display:none !important;}
 
-  #layoutOverlay{position:absolute;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:25;padding:18px;overflow:auto}
-  #layoutOverlay.show{display:flex}
-  .layoutPanel{width:min(760px,96vw);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid #303036;border-radius:18px;padding:20px}
+  #layoutOverlay, #previewOverlay{position:absolute;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:25;padding:18px;overflow:auto}
+  #layoutOverlay.show, #previewOverlay.show{display:flex}
+  .layoutPanel, .previewPanel{width:min(760px,96vw);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid #303036;border-radius:18px;padding:20px}
   .layoutTitle{font-size:20px;font-weight:700;margin-bottom:4px}
   .layoutSub{font-size:12px;color:var(--muted);margin-bottom:16px}
 
@@ -52,12 +52,16 @@
   .layoutGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
   .layoutCard{background:#202024;color:var(--text);border:2px solid transparent;border-radius:14px;padding:10px;cursor:pointer;text-align:center}
   .layoutCard.selected{border-color:var(--accent);background:#29291f}
-  .layoutThumb{height:150px;background:#fff;border-radius:7px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px}
+  .layoutThumb{height:190px;background:#fff;border-radius:7px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px}
   .layoutThumb canvas{max-width:100%;max-height:100%;width:auto;height:auto}
   .layoutName{font-size:13px;font-weight:700}
-  .layoutActions{display:flex;gap:12px;justify-content:flex-end;margin-top:16px}
-  .layoutActions button{flex:1;max-width:260px}
-  @media(max-width:650px){.layoutGrid{grid-template-columns:repeat(2,1fr)}.layoutThumb{height:135px}.layoutPanel{padding:15px}}
+  .layoutMeta{font-size:10px;color:var(--muted);margin-top:2px}
+  .layoutActions{display:flex;gap:12px;justify-content:center;margin-top:16px}
+  @media(max-width:650px){.layoutGrid{grid-template-columns:repeat(2,1fr)}.layoutThumb{height:170px}.layoutPanel{padding:15px}}
+
+  .previewCanvasWrap{max-height:58vh;overflow:auto;display:flex;justify-content:center;background:#e9e9e9;
+    border-radius:10px;padding:14px;margin-bottom:6px}
+  #previewCanvas{max-width:100%;box-shadow:0 4px 18px #0006;}
 
   #toast{position:absolute; bottom:110px; left:50%; transform:translateX(-50%); background:#000c;
     color:#fff; padding:10px 18px; border-radius:10px; font-size:13px; z-index:30; display:none;}
@@ -68,6 +72,10 @@
 <!-- Real, scannable CODE128 barcode rendering (self-hosted copy recommended for
      offline reliability — see the note at the bottom of the chat reply). -->
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.code128.min.js"></script>
+<!-- Synchronous QR-code module generator (no image loading needed — we draw
+     the modules straight onto the canvas). Same offline-fallback pattern as
+     the barcode library above. -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 
 <div id="app">
   <header>
@@ -84,15 +92,13 @@
 
   <footer>
     <button class="ghost" id="connectBtn">Connect Printer</button>
-    <button class="primary" id="mainBtn">TAKE PHOTO</button>
-    <button class="ghost hidden" id="retakeBtn">Retake</button>
+    <button class="ghost" id="newSessionBtn">New Session</button>
   </footer>
-
 
   <div id="layoutOverlay">
     <div class="layoutPanel">
       <div class="layoutTitle">Choose Print Layout</div>
-      <div class="layoutSub">Select how your photo will appear on the 80 mm thermal print.</div>
+      <div class="layoutSub">Select how your photos will appear on the 80&nbsp;mm thermal print, then take your shots.</div>
 
       <div class="nameField">
         <label for="guestName">Your name (optional — printed on the receipt)</label>
@@ -100,14 +106,41 @@
       </div>
 
       <div class="layoutGrid">
-        <button class="layoutCard selected" data-layout="portrait"><div class="layoutThumb"><canvas id="thumbPortrait"></canvas></div><div class="layoutName">Portrait</div></button>
-        <button class="layoutCard" data-layout="strip"><div class="layoutThumb"><canvas id="thumbStrip"></canvas></div><div class="layoutName">Photo Strip</div></button>
-        <button class="layoutCard" data-layout="receipt"><div class="layoutThumb"><canvas id="thumbReceipt"></canvas></div><div class="layoutName">Receipt Style</div></button>
-        <button class="layoutCard" data-layout="minimal"><div class="layoutThumb"><canvas id="thumbMinimal"></canvas></div><div class="layoutName">Minimal</div></button>
+        <button class="layoutCard selected" data-layout="strip">
+          <div class="layoutThumb"><canvas id="thumbStrip"></canvas></div>
+          <div class="layoutName">Photo Strip</div>
+          <div class="layoutMeta">80×150mm · 4 photos</div>
+        </button>
+        <button class="layoutCard" data-layout="duo">
+          <div class="layoutThumb"><canvas id="thumbDuo"></canvas></div>
+          <div class="layoutName">Two Photos</div>
+          <div class="layoutMeta">80×120mm · 2 photos</div>
+        </button>
+        <button class="layoutCard" data-layout="large">
+          <div class="layoutThumb"><canvas id="thumbLarge"></canvas></div>
+          <div class="layoutName">Large + Details</div>
+          <div class="layoutMeta">80×100mm · 1 photo</div>
+        </button>
+        <button class="layoutCard" data-layout="grid">
+          <div class="layoutThumb"><canvas id="thumbGrid"></canvas></div>
+          <div class="layoutName">Photo Grid</div>
+          <div class="layoutMeta">80×150mm · 4 photos</div>
+        </button>
       </div>
       <div class="layoutActions">
-        <button class="ghost" id="layoutRetakeBtn">Retake</button>
-        <button class="primary" id="layoutPrintBtn">PRINT</button>
+        <button class="primary" id="layoutContinueBtn">TAKE PHOTOS</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="previewOverlay">
+    <div class="previewPanel">
+      <div class="layoutTitle">Ready to Print</div>
+      <div class="layoutSub">Review your photos, then retake or print.</div>
+      <div class="previewCanvasWrap"><canvas id="previewCanvas"></canvas></div>
+      <div class="layoutActions">
+        <button class="ghost" id="retakeAllBtn">RETAKE</button>
+        <button class="primary" id="printBtn">PRINT</button>
       </div>
     </div>
   </div>
@@ -115,8 +148,8 @@
   <div id="setupOverlay">
     <div style="font-size:22px; font-weight:700;">Receipt Photo Booth</div>
     <p>1. Allow camera access.<br>2. Tap "Connect Printer" and pick your Bluetooth thermal printer.<br>
-       3. Tap the big button, smile, and your photo prints like a receipt.</p>
-    <button class="primary" id="startBtn">Start Camera</button>
+       3. Tap Start, choose your print layout, then take your photos.</p>
+    <button class="primary" id="startBtn">START</button>
   </div>
   <div id="toast"></div>
 </div>
@@ -135,14 +168,33 @@ const PRINTER_SERVICE_UUID        = 0x18F0; // generic serial service
 const PRINTER_CHARACTERISTIC_UUID = 0x2AF1; // generic write characteristic
 const PRINTER_WIDTH_DOTS = 576; // typical 80mm printer at 203dpi
 const PRINTER_WIDTH_BYTES = PRINTER_WIDTH_DOTS / 8;
+const DOTS_PER_MM = PRINTER_WIDTH_DOTS / 80; // keeps every layout's real mm size proportional
+
+// Edit this to your own gallery/booking page if you want the Layout 4 QR
+// code to link somewhere real. Left as-is it still scans fine — it just
+// encodes the order number.
+const PHOTOBOOTH_GALLERY_URL = 'https://your-photobooth-site.example/g';
+
+// Each print layout: how many shots it needs, and its real printed
+// height in millimeters (width is always the 80mm printer width).
+const LAYOUTS = {
+  strip: { shots:4, heightMM:150 },
+  duo:   { shots:2, heightMM:120 },
+  large: { shots:1, heightMM:100 },
+  grid:  { shots:4, heightMM:150 },
+};
 
 let bleDevice = null, bleChar = null;
 let stream = null;
-let lastShot = null; // {canvas}
+let lastShots = []; // array of per-shot canvases for the current session
+let selectedLayout = 'strip';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
 const toastEl = $('toast');
+const countdownEl = $('countdown');
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 function toast(msg, ms=2200){
   toastEl.textContent = msg;
@@ -165,7 +217,7 @@ function peekReceiptNumber(){
   return (parseInt(localStorage.getItem('receiptCounter') || '0', 10) + 1);
 }
 
-/* ---------------- Barcode ---------------- */
+/* ---------------- Barcode / QR ---------------- */
 // Renders a real, scannable CODE128 barcode onto an offscreen canvas
 // using the JsBarcode library loaded above.
 function drawBarcode(value){
@@ -188,6 +240,32 @@ function drawBarcode(value){
   return bc;
 }
 
+// Draws a scannable QR code directly onto the print canvas. Uses
+// qrcode-generator's synchronous module data (isDark/getModuleCount)
+// instead of an <img>, so it never has to wait on image decoding —
+// same offline-fallback pattern as drawBarcode above.
+function drawQRCode(ctx, text, x, y, size){
+  try{
+    const qr = qrcode(0, 'M');
+    qr.addData(text);
+    qr.make();
+    const count = qr.getModuleCount();
+    const cell = size / count;
+    ctx.fillStyle = '#000';
+    for(let r=0;r<count;r++){
+      for(let cIdx=0;cIdx<count;cIdx++){
+        if(qr.isDark(r,cIdx)){
+          ctx.fillRect(x + cIdx*cell, y + r*cell, Math.ceil(cell), Math.ceil(cell));
+        }
+      }
+    }
+    ctx.fillStyle = '#000';
+  }catch(e){
+    // qrcode-generator not loaded (offline) — leave the space blank
+    // rather than breaking the whole print.
+  }
+}
+
 /* ---------------- Camera ---------------- */
 async function startCamera(){
   try{
@@ -197,6 +275,7 @@ async function startCamera(){
     });
     $('video').srcObject = stream;
     $('setupOverlay').classList.add('hidden');
+    openLayoutChooser();
   }catch(e){
     toast('Camera error: ' + e.message, 4000);
   }
@@ -311,176 +390,316 @@ function ditheredToEscposBytes(dithered, widthBytes){
   return Array.from(bytes);
 }
 
-/* ---------------- Capture + layout + print flow ---------------- */
-const mainBtn = $('mainBtn');
-const retakeBtn = $('retakeBtn');
-const layoutOverlay = $('layoutOverlay');
-const layoutPrintBtn = $('layoutPrintBtn');
-const layoutRetakeBtn = $('layoutRetakeBtn');
-const guestNameInput = $('guestName');
-let selectedLayout = 'portrait';
-
-function showLayoutChooser(){
-  if(!lastShot) return;
-  selectedLayout='portrait';
-  guestNameInput.value = '';
-  document.querySelectorAll('.layoutCard').forEach(c=>c.classList.toggle('selected',c.dataset.layout===selectedLayout));
-  drawLayoutThumbs();
-  layoutOverlay.classList.add('show');
-}
-function hideLayoutChooser(){layoutOverlay.classList.remove('show');}
-
-function drawFitImage(ctx,source,x,y,w,h){
-  const sr=source.width/source.height, br=w/h;
-  let dw,dh;
-  if(sr>br){dh=h;dw=h*sr}else{dw=w;dh=w/sr}
-  ctx.drawImage(source,x+(w-dw)/2,y+(h-dh)/2,dw,dh);
+/* ---------------- Layout drawing helpers ---------------- */
+function setLetterSpacing(ctx, px){
+  try{ ctx.letterSpacing = px+'px'; }catch(e){ /* unsupported: falls back to normal spacing */ }
 }
 
-// Draws the personalized name line + order number + scannable
-// barcode as a shared footer block, used by every layout. Returns
-// the height it consumed so callers can size their canvas.
-function drawReceiptFooter(ctx, W, y, receiptNo, guestName){
-  const margin = 24;
-  let cy = y;
-
-  if (guestName) {
-    ctx.font = 'bold 22px Arial';
-    ctx.fillText('FOR: ' + guestName.toUpperCase(), W/2, cy + 22);
-    cy += 34;
-  }
-
-  ctx.font = '16px Arial';
-  const orderStr = 'ORDER NO. ' + String(receiptNo).padStart(6,'0');
-  ctx.fillText(orderStr, W/2, cy + 16);
-  cy += 26;
-
-  const barcodeValue = String(receiptNo).padStart(6,'0');
-  const bcCanvas = drawBarcode(barcodeValue);
-  const bcDrawWidth = Math.min(W - margin*2, 320);
-  const bcDrawHeight = bcCanvas.height * (bcDrawWidth / bcCanvas.width);
-  ctx.drawImage(bcCanvas, (W-bcDrawWidth)/2, cy, bcDrawWidth, bcDrawHeight);
-  cy += bcDrawHeight + 10;
-
-  return cy - y;
-}
-
-function buildLayoutCanvas(layout, receiptNo, guestName){
-  const W=PRINTER_WIDTH_DOTS, margin=24, gap=18;
-  const footerH = 95 + (guestName ? 34 : 0); // reserved space for name+order+barcode
-  const H=(layout==='strip'?1040:layout==='receipt'?850:layout==='minimal'?720:760) + footerH;
-  const c=document.createElement('canvas'); c.width=W; c.height=H;
-  const ctx=c.getContext('2d');
-  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.fillStyle='#000';ctx.textAlign='center';
-
-  if(layout==='portrait'){
-    ctx.font='bold 28px Arial';ctx.fillText('PHOTO BOOTH',W/2,40);
-    drawFitImage(ctx,lastShot,margin,60,W-margin*2,590);
-    ctx.font='20px Arial';ctx.fillText(new Date().toLocaleDateString(),W/2,690);
-    ctx.font='bold 20px Arial';ctx.fillText('THANKS FOR VISITING!',W/2,725);
-    drawReceiptFooter(ctx, W, 750, receiptNo, guestName);
-  }else if(layout==='strip'){
-    ctx.font='bold 28px Arial';ctx.fillText('PHOTO BOOTH',W/2,38);
-    const boxW=W-margin*2,boxH=285;
-    for(let i=0;i<3;i++) drawFitImage(ctx,lastShot,margin,55+i*(boxH+gap),boxW,boxH);
-    ctx.font='bold 20px Arial';ctx.fillText('THANKS FOR VISITING!',W/2,1040-25);
-    drawReceiptFooter(ctx, W, 1040, receiptNo, guestName);
-  }else if(layout==='receipt'){
-    ctx.font='bold 30px Arial';ctx.fillText('*** PHOTO BOOTH ***',W/2,40);
-    ctx.font='19px Arial';ctx.fillText(new Date().toLocaleString(),W/2,72);
-    ctx.fillRect(margin,92,W-margin*2,3);
-    drawFitImage(ctx,lastShot,margin,110,W-margin*2,575);
-    ctx.fillRect(margin,705,W-margin*2,3);
-    ctx.font='bold 22px Arial';ctx.fillText('SMILE! THANKS FOR VISITING',W/2,745);
-    ctx.font='18px Arial';ctx.fillText('YOUR PHOTO MEMORY',W/2,780);
-    drawReceiptFooter(ctx, W, 800, receiptNo, guestName);
+// Draws one photo (or an empty placeholder box, for pre-capture previews)
+// into a bordered slot — cropped/centered to fill it, like a real print.
+function drawFitImage(ctx, source, x, y, w, h){
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  if(source){
+    const sr = source.width/source.height, br = w/h;
+    let dw, dh;
+    if(sr > br){ dh = h; dw = h*sr; } else { dw = w; dh = w/sr; }
+    ctx.drawImage(source, x+(w-dw)/2, y+(h-dh)/2, dw, dh);
   }else{
-    // Minimal: photo stays the star; only a small barcode strip at
-    // the very bottom, no name/order text, to keep the look clean.
-    drawFitImage(ctx,lastShot,0,0,W,720);
-    const bcCanvas = drawBarcode(String(receiptNo).padStart(6,'0'));
-    const bcW = 220, bcH = bcCanvas.height * (bcW/bcCanvas.width);
-    ctx.drawImage(bcCanvas, (W-bcW)/2, 730, bcW, bcH);
+    ctx.fillStyle = '#e2e2e2';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#9a9a9a';
+    ctx.font = Math.round(h*0.16)+'px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('\u25A1', x+w/2, y+h/2);
+    ctx.textBaseline = 'alphabetic';
   }
+  ctx.restore();
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+  ctx.strokeRect(x+1, y+1, w-2, h-2);
+  ctx.fillStyle = '#000';
+}
+
+/* ---------------- The 4 print layouts ----------------
+   Canvas width is always PRINTER_WIDTH_DOTS (the 80mm printer width).
+   Canvas height is derived from each layout's real millimeter length
+   (LAYOUTS[key].heightMM), so what prints is a true 80×150 / 80×120 /
+   80×100mm receipt rather than a fixed pixel guess. */
+function buildLayoutCanvas(layoutKey, receiptNo, guestName, shots){
+  shots = shots || [];
+  const cfg = LAYOUTS[layoutKey];
+  const W = PRINTER_WIDTH_DOTS;
+  const H = Math.round(cfg.heightMM * DOTS_PER_MM);
+  const margin = 26;
+
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+
+  const dateStr = new Date().toLocaleDateString('en-CA'); // yyyy-mm-dd, matches sample
+
+  if(layoutKey === 'strip'){
+    let y = 46;
+    ctx.font = 'italic bold 34px cursive';
+    ctx.fillText('\u2665 Photo Booth \u2665', W/2, y);
+    y += 24;
+    ctx.font = 'bold 13px Arial'; setLetterSpacing(ctx,3);
+    ctx.fillText('GOOD VIBES ONLY', W/2, y); setLetterSpacing(ctx,0);
+    y += 16;
+    ctx.beginPath(); ctx.moveTo(margin,y); ctx.lineTo(W-margin,y); ctx.lineWidth=1; ctx.stroke();
+    y += 14;
+    if(guestName){ ctx.font='italic 15px Arial'; ctx.fillText('for '+guestName, W/2, y+12); y += 26; }
+
+    const footerH = 74;
+    const photoTop = y;
+    const gap = 8;
+    const boxH = (H - footerH - photoTop - gap*3) / 4;
+    for(let i=0;i<4;i++){
+      drawFitImage(ctx, shots[i], margin, photoTop + i*(boxH+gap), W-margin*2, boxH);
+    }
+
+    let fy = H - footerH + 20;
+    ctx.font = '16px Arial';
+    ctx.fillText('\u2014 ' + dateStr + ' \u2014', W/2, fy); fy += 26;
+    ctx.font = '18px Arial';
+    ctx.fillText('\u2665', W/2, fy); fy += 20;
+    ctx.font = '9px Arial';
+    ctx.fillText('#'+String(receiptNo).padStart(6,'0'), W/2, fy);
+  }
+
+  else if(layoutKey === 'duo'){
+    let y = 46;
+    ctx.font = 'italic bold 32px cursive';
+    ctx.fillText('\u2010 Good Times \u2010', W/2, y);
+    y += 24;
+    ctx.font = 'bold 13px Arial'; setLetterSpacing(ctx,3);
+    ctx.fillText('PHOTO BOOTH', W/2, y); setLetterSpacing(ctx,0);
+    y += 16;
+    ctx.beginPath(); ctx.moveTo(margin,y); ctx.lineTo(W-margin,y); ctx.lineWidth=1; ctx.stroke();
+    y += 14;
+    if(guestName){ ctx.font='italic 15px Arial'; ctx.fillText('for '+guestName, W/2, y+12); y += 26; }
+
+    const footerH = 96;
+    const photoTop = y;
+    const gap = 12;
+    const boxH = (H - footerH - photoTop - gap) / 2;
+    for(let i=0;i<2;i++){
+      drawFitImage(ctx, shots[i], margin, photoTop + i*(boxH+gap), W-margin*2, boxH);
+    }
+
+    let fy = H - footerH + 26;
+    ctx.font = 'bold 16px Arial'; setLetterSpacing(ctx,1);
+    ctx.fillText('\u2014 THANK YOU \u2014', W/2, fy); setLetterSpacing(ctx,0); fy += 26;
+    ctx.font = '14px Arial';
+    ctx.fillText(dateStr, W/2, fy); fy += 22;
+    ctx.font = '16px Arial';
+    ctx.fillText('\u2665', W/2, fy);
+  }
+
+  else if(layoutKey === 'large'){
+    let y = 44;
+    ctx.font = 'italic bold 32px cursive';
+    ctx.fillText('\u2665 Better Together \u2665', W/2, y);
+    y += 22;
+    if(guestName){ ctx.font='italic 15px Arial'; ctx.fillText('for '+guestName, W/2, y+12); y += 24; }
+
+    const footerH = 170;
+    const photoTop = y;
+    const photoH = H - footerH - photoTop;
+    drawFitImage(ctx, shots[0], margin, photoTop, W-margin*2, photoH);
+
+    let fy = photoTop + photoH + 24;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(margin, fy); ctx.lineTo(W/2-16, fy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W/2+16, fy); ctx.lineTo(W-margin, fy); ctx.stroke();
+    ctx.font = '16px Arial';
+    ctx.fillText('\u2665', W/2, fy+6);
+    fy += 30;
+    ctx.font = '15px Arial';
+    ctx.fillText(dateStr, W/2, fy); fy += 20;
+
+    const bcCanvas = drawBarcode(String(receiptNo).padStart(6,'0'));
+    const bcW = Math.min(W-margin*2, 320);
+    const bcH = bcCanvas.height * (bcW/bcCanvas.width);
+    ctx.drawImage(bcCanvas, (W-bcW)/2, fy, bcW, bcH);
+    fy += bcH + 20;
+
+    ctx.font = 'bold 18px Arial'; setLetterSpacing(ctx,2);
+    ctx.fillText('THANK YOU', W/2, fy); setLetterSpacing(ctx,0);
+  }
+
+  else{ // grid
+    let y = 42;
+    ctx.font = 'bold 26px Arial';
+    ctx.fillText('\u2726 MEMORIES \u2726', W/2, y);
+    y += 22;
+    ctx.font = 'bold 13px Arial'; setLetterSpacing(ctx,3);
+    ctx.fillText('PHOTO BOOTH', W/2, y); setLetterSpacing(ctx,0);
+    y += 16;
+    ctx.beginPath(); ctx.moveTo(margin,y); ctx.lineTo(W-margin,y); ctx.lineWidth=1; ctx.stroke();
+    y += 14;
+    if(guestName){ ctx.font='italic 15px Arial'; ctx.fillText('for '+guestName, W/2, y+12); y += 26; }
+
+    const footerH = 230;
+    const photoTop = y;
+    const gap = 10;
+    const gridH = H - footerH - photoTop;
+    const cellW = (W - margin*2 - gap) / 2;
+    const cellH = (gridH - gap) / 2;
+    for(let i=0;i<4;i++){
+      const col = i % 2, row = Math.floor(i/2);
+      drawFitImage(ctx, shots[i], margin + col*(cellW+gap), photoTop + row*(cellH+gap), cellW, cellH);
+    }
+
+    let fy = photoTop + gridH + 30;
+    ctx.font = '16px Arial';
+    ctx.fillText('\u2014 ' + dateStr + ' \u2014', W/2, fy);
+    fy += 20;
+
+    const qrSize = 120;
+    drawQRCode(ctx, PHOTOBOOTH_GALLERY_URL + '/' + String(receiptNo).padStart(6,'0'), (W-qrSize)/2, fy, qrSize);
+    fy += qrSize + 20;
+
+    ctx.font = '10px Arial'; setLetterSpacing(ctx,2);
+    ctx.fillText('SCAN FOR MORE MEMORIES', W/2, fy); setLetterSpacing(ctx,0);
+  }
+
   return c;
 }
 
-function drawThumb(id,layout){
-  const thumb=$(id);
+/* ---------------- Layout chooser thumbnails ---------------- */
+function drawThumb(id, layoutKey){
+  const thumb = $(id);
   const previewNo = peekReceiptNumber();
-  const preview=buildLayoutCanvas(layout, previewNo, guestNameInput.value.trim());
-  const scale=Math.min(190/preview.width,240/preview.height);
-  thumb.width=Math.round(preview.width*scale);
-  thumb.height=Math.round(preview.height*scale);
+  const preview = buildLayoutCanvas(layoutKey, previewNo, guestNameInput.value.trim(), []);
+  const scale = Math.min(150/preview.width, 220/preview.height);
+  thumb.width = Math.round(preview.width*scale);
+  thumb.height = Math.round(preview.height*scale);
   thumb.getContext('2d').drawImage(preview,0,0,thumb.width,thumb.height);
 }
 function drawLayoutThumbs(){
-  drawThumb('thumbPortrait','portrait');drawThumb('thumbStrip','strip');
-  drawThumb('thumbReceipt','receipt');drawThumb('thumbMinimal','minimal');
+  drawThumb('thumbStrip','strip');
+  drawThumb('thumbDuo','duo');
+  drawThumb('thumbLarge','large');
+  drawThumb('thumbGrid','grid');
 }
-guestNameInput.addEventListener('input', () => drawLayoutThumbs());
+
+/* ---------------- Session flow: choose layout -> capture -> preview -> print ---------------- */
+const layoutOverlay = $('layoutOverlay');
+const previewOverlay = $('previewOverlay');
+const guestNameInput = $('guestName');
+const continueBtn = $('layoutContinueBtn');
+const retakeAllBtn = $('retakeAllBtn');
+const printBtn = $('printBtn');
+const previewCanvas = $('previewCanvas');
+
+function openLayoutChooser(){
+  lastShots = [];
+  $('snapCanvas').style.display = 'none';
+  $('video').style.display = 'block';
+  drawLayoutThumbs();
+  document.querySelectorAll('.layoutCard').forEach(c=>c.classList.toggle('selected', c.dataset.layout===selectedLayout));
+  layoutOverlay.classList.add('show');
+}
+
+guestNameInput.addEventListener('input', drawLayoutThumbs);
 
 document.querySelectorAll('.layoutCard').forEach(card=>{
-  card.onclick=()=>{
-    selectedLayout=card.dataset.layout;
-    document.querySelectorAll('.layoutCard').forEach(c=>c.classList.toggle('selected',c===card));
+  card.onclick = () => {
+    selectedLayout = card.dataset.layout;
+    document.querySelectorAll('.layoutCard').forEach(c=>c.classList.toggle('selected', c===card));
   };
 });
-layoutRetakeBtn.onclick=()=>{hideLayoutChooser();retakeBtn.click();};
-layoutPrintBtn.onclick=async()=>{hideLayoutChooser();await doPrint();};
 
-mainBtn.onclick=async()=>{await runCountdownAndCapture();};
-
-retakeBtn.onclick=()=>{
-  hideLayoutChooser();$('snapCanvas').style.display='none';$('video').style.display='block';
-  retakeBtn.classList.add('hidden');mainBtn.textContent='TAKE PHOTO';mainBtn.dataset.mode='';
+continueBtn.onclick = async () => {
+  if(!stream){ toast('Start the camera first'); return; }
+  layoutOverlay.classList.remove('show');
+  await runCaptureSequence(selectedLayout);
 };
 
-async function runCountdownAndCapture(){
-  if(!stream){toast('Start the camera first');return;}
-  mainBtn.disabled=true;
-  const cd=$('countdown');cd.style.display='flex';
-  for(const n of ['3','2','1']){cd.textContent=n;await new Promise(r=>setTimeout(r,700));}
-  cd.style.display='none';
-
-  $('flash').style.transition='none';$('flash').style.opacity='1';
-  setTimeout(()=>{$('flash').style.transition='opacity .4s';$('flash').style.opacity='0';},60);
-
-  const video=$('video'),canvas=$('snapCanvas');
-  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
-  const ctx=canvas.getContext('2d');
-  ctx.translate(canvas.width,0);ctx.scale(-1,1);ctx.drawImage(video,0,0);
-  lastShot=canvas;
-
-  video.style.display='none';canvas.style.display='block';retakeBtn.classList.remove('hidden');
-  mainBtn.textContent='CHOOSE LAYOUT';mainBtn.dataset.mode='layout';mainBtn.disabled=false;
-  showLayoutChooser();
+async function runCaptureSequence(layoutKey){
+  const cfg = LAYOUTS[layoutKey];
+  lastShots = [];
+  for(let i=1; i<=cfg.shots; i++){
+    await captureSingleShot(i, cfg.shots);
+  }
+  showPreview();
 }
 
-async function doPrint(){
-  if(!lastShot){toast('Take a photo first');return;}
-  if(!bleChar){toast('Connect the printer first');return;}
-  mainBtn.disabled=true;layoutPrintBtn.disabled=true;layoutPrintBtn.textContent='PRINTING…';
+async function captureSingleShot(i, total){
+  countdownEl.style.display = 'flex';
+  for(const n of ['3','2','1']){
+    countdownEl.innerHTML = `<div>${n}</div>` +
+      (total>1 ? `<div style="font-size:5vw;margin-top:10px;">Shot ${i} of ${total}</div>` : '');
+    await sleep(700);
+  }
+  countdownEl.style.display = 'none';
+
+  $('flash').style.transition='none'; $('flash').style.opacity='1';
+  setTimeout(()=>{ $('flash').style.transition='opacity .4s'; $('flash').style.opacity='0'; },60);
+
+  const video = $('video');
+  const shot = document.createElement('canvas');
+  shot.width = video.videoWidth; shot.height = video.videoHeight;
+  const sctx = shot.getContext('2d');
+  sctx.translate(shot.width,0); sctx.scale(-1,1); sctx.drawImage(video,0,0);
+  lastShots.push(shot);
+
+  if(i < total) await sleep(700); // brief pause, live video visible, before the next shot
+}
+
+function showPreview(){
+  $('video').style.display = 'none';
+  const receiptNo = peekReceiptNumber();
+  const guestName = guestNameInput.value.trim();
+  const canvas = buildLayoutCanvas(selectedLayout, receiptNo, guestName, lastShots);
+  previewCanvas.width = canvas.width; previewCanvas.height = canvas.height;
+  const scale = Math.min(1, 480/canvas.width);
+  previewCanvas.style.width = Math.round(canvas.width*scale)+'px';
+  previewCanvas.style.height = 'auto';
+  previewCanvas.getContext('2d').drawImage(canvas,0,0);
+  previewOverlay.classList.add('show');
+}
+
+retakeAllBtn.onclick = async () => {
+  previewOverlay.classList.remove('show');
+  $('video').style.display = 'block';
+  await runCaptureSequence(selectedLayout);
+};
+
+printBtn.onclick = async () => {
+  if(!lastShots.length){ toast('Take your photos first'); return; }
+  if(!bleChar){ toast('Connect the printer first'); return; }
+  printBtn.disabled = true; retakeAllBtn.disabled = true; printBtn.textContent = 'PRINTING\u2026';
   try{
     const receiptNo = nextReceiptNumber();
     const guestName = guestNameInput.value.trim();
-    const layoutCanvas=buildLayoutCanvas(selectedLayout, receiptNo, guestName);
-    const dithered=prepareReceiptImage(layoutCanvas,PRINTER_WIDTH_DOTS);
-    const imgBytes=ditheredToEscposBytes(dithered,PRINTER_WIDTH_BYTES);
-    let payload=[];
-    payload=payload.concat(escposInit(),escposAlignCenter());
-    payload=payload.concat(escposRasterHeader(PRINTER_WIDTH_BYTES,dithered.height));
-    payload=payload.concat(imgBytes,escposFeed(4));
-    await printerWrite(payload);toast('Printed! #'+String(receiptNo).padStart(6,'0'));
-  }catch(e){toast('Print failed: '+e.message,4000);}
-  finally{
-    layoutPrintBtn.disabled=false;layoutPrintBtn.textContent='PRINT';
+    const layoutCanvas = buildLayoutCanvas(selectedLayout, receiptNo, guestName, lastShots);
+    const dithered = prepareReceiptImage(layoutCanvas, PRINTER_WIDTH_DOTS);
+    const imgBytes = ditheredToEscposBytes(dithered, PRINTER_WIDTH_BYTES);
+    let payload = [];
+    payload = payload.concat(escposInit(), escposAlignCenter());
+    payload = payload.concat(escposRasterHeader(PRINTER_WIDTH_BYTES, dithered.height));
+    payload = payload.concat(imgBytes, escposFeed(4));
+    await printerWrite(payload);
+    toast('Printed! #'+String(receiptNo).padStart(6,'0'));
+  }catch(e){
+    toast('Print failed: '+e.message, 4000);
+  }finally{
+    printBtn.disabled = false; retakeAllBtn.disabled = false; printBtn.textContent = 'PRINT';
     setTimeout(()=>{
-      hideLayoutChooser();$('snapCanvas').style.display='none';$('video').style.display='block';
-      retakeBtn.classList.add('hidden');mainBtn.textContent='TAKE PHOTO';mainBtn.dataset.mode='';mainBtn.disabled=false;
-    },1500);
+      previewOverlay.classList.remove('show');
+      openLayoutChooser();
+    }, 1500);
   }
-}
+};
+
+$('newSessionBtn').onclick = () => {
+  if(!stream){ toast('Start the camera first'); return; }
+  previewOverlay.classList.remove('show');
+  openLayoutChooser();
+};
 
 /* Guard: Web Bluetooth / camera need a Chromium browser (Android tablet in kiosk mode). */
 if(!navigator.bluetooth){
